@@ -1,4 +1,4 @@
-<script lang="ts">
+<script>
 	import { auth as authApi } from '$lib/api/client';
 	import { setAuth } from '$lib/stores/auth';
 	import { goto } from '$app/navigation';
@@ -20,7 +20,7 @@
 			const res = await authApi.register({ email, username, password });
 			setAuth(res.token, res.user);
 			goto('/drive');
-		} catch (e: any) {
+		} catch (e) {
 			error = 'Kayıt başarısız. E-posta veya kullanıcı adı zaten kullanılıyor olabilir.';
 		} finally {
 			loading = false;

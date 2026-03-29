@@ -10,8 +10,9 @@ use axum::{
     Router,
     routing::{delete, get, patch, post, put},
 };
-use sqlx::postgres::PgPoolOptions;
+use deadpool_postgres::{Config, Runtime, Pool};
 use tokio::sync::{RwLock, broadcast};
+use tokio_postgres::NoTls;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -20,7 +21,7 @@ use config::AppConfig;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub db: sqlx::PgPool,
+    pub db: Pool,
     pub config: AppConfig,
     pub transfer_channels: Arc<RwLock<HashMap<String, Arc<broadcast::Sender<String>>>>>,
 }
@@ -38,29 +39,32 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let config = AppConfig::from_env();
+    let app_config = AppConfig::from_env();
 
     // Database pool
-    let db = PgPoolOptions::new()
-        .max_connections(20)
-        .connect(&config.database_url)
-        .await
-        .expect("Failed to connect to database");
+    let mut pg_config = Config::new();
+    pg_config.url = Some(app_config.database_url.clone());
+    let db = pg_config
+        .create_pool(Some(Runtime::Tokio1), NoTls)
+        .expect("Failed to create database pool");
 
     // Run migrations
-    sqlx::query(include_str!("../migrations/001_init.sql"))
-        .execute(&db)
-        .await
-        .expect("Failed to run migrations");
+    {
+        let client = db.get().await.expect("Failed to get DB connection");
+        client
+            .batch_execute(include_str!("../migrations/001_init.sql"))
+            .await
+            .expect("Failed to run migrations");
+    }
 
     // Create upload directory
-    tokio::fs::create_dir_all(&config.upload_dir)
+    tokio::fs::create_dir_all(&app_config.upload_dir)
         .await
         .expect("Failed to create upload directory");
 
     let state = AppState {
         db,
-        config: config.clone(),
+        config: app_config.clone(),
         transfer_channels: Arc::new(RwLock::new(HashMap::new())),
     };
 
@@ -111,7 +115,7 @@ async fn main() {
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
-    let addr = format!("{}:{}", config.host, config.port);
+    let addr = format!("{}:{}", app_config.host, app_config.port);
     tracing::info!("Server starting on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(&addr)

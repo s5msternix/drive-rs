@@ -1,19 +1,19 @@
-<script lang="ts">
+<script>
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { share as shareApi } from '$lib/api/client';
 	import { formatBytes } from '$lib/stores/auth';
 
-	let info: any = $state(null);
+	let info = $state(null);
 	let error = $state('');
 	let downloading = $state(false);
 
-	const token = $page.params.token!;
+	const token = $page.params.token;
 
 	onMount(async () => {
 		try {
-			info = await shareApi.getInfo(token!);
-		} catch (e: any) {
+			info = await shareApi.getInfo(token);
+		} catch (e) {
 			error = 'Bu paylaşım linki geçersiz veya süresi dolmuş.';
 		}
 	});
@@ -21,14 +21,14 @@
 	async function download() {
 		downloading = true;
 		try {
-			const blob = await shareApi.download(token!);
+			const blob = await shareApi.download(token);
 			const url = URL.createObjectURL(blob);
 			const a = document.createElement('a');
 			a.href = url;
 			a.download = info.name;
 			a.click();
 			URL.revokeObjectURL(url);
-		} catch (e: any) {
+		} catch (e) {
 			error = 'İndirme başarısız.';
 		} finally {
 			downloading = false;

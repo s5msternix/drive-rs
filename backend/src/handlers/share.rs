@@ -3,7 +3,7 @@ use rand::Rng;
 
 use crate::AppState;
 use crate::middleware::AuthUser;
-use crate::models::{CreateShareLinkRequest, ShareLink, ShareLinkResponse};
+use crate::models::{CreateShareLinkRequest, FileRecord, Folder, ShareLink, ShareLinkResponse};
 
 fn generate_token() -> String {
     let mut rng = rand::thread_rng();
@@ -16,26 +16,29 @@ pub async fn create_link(
     auth: AuthUser,
     Json(req): Json<CreateShareLinkRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    // Must have either file_id or folder_id
     if req.file_id.is_none() && req.folder_id.is_none() {
         return Err(StatusCode::BAD_REQUEST);
     }
 
+    let client = state.db.get().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
     // Verify ownership
     if let Some(file_id) = req.file_id {
-        sqlx::query("SELECT id FROM files WHERE id = $1 AND owner_id = $2")
-            .bind(file_id)
-            .bind(auth.user_id)
-            .fetch_optional(&state.db)
+        client
+            .query_opt(
+                "SELECT id FROM files WHERE id = $1 AND owner_id = $2",
+                &[&file_id, &auth.user_id],
+            )
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
             .ok_or(StatusCode::NOT_FOUND)?;
     }
     if let Some(folder_id) = req.folder_id {
-        sqlx::query("SELECT id FROM folders WHERE id = $1 AND owner_id = $2")
-            .bind(folder_id)
-            .bind(auth.user_id)
-            .fetch_optional(&state.db)
+        client
+            .query_opt(
+                "SELECT id FROM folders WHERE id = $1 AND owner_id = $2",
+                &[&folder_id, &auth.user_id],
+            )
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
             .ok_or(StatusCode::NOT_FOUND)?;
@@ -47,7 +50,7 @@ pub async fn create_link(
         chrono::Utc::now() + chrono::Duration::hours(hours)
     });
 
-    let password_hash = if let Some(ref pw) = req.password {
+    let password_hash: Option<String> = if let Some(ref pw) = req.password {
         use argon2::{Argon2, PasswordHasher, password_hash::SaltString};
         use rand::rngs::OsRng;
         let salt = SaltString::generate(&mut OsRng);
@@ -61,21 +64,16 @@ pub async fn create_link(
         None
     };
 
-    let link = sqlx::query_as::<_, ShareLink>(
-        r#"INSERT INTO share_links (file_id, folder_id, token, expires_at, max_downloads, password_hash, created_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
-           RETURNING *"#,
-    )
-    .bind(req.file_id)
-    .bind(req.folder_id)
-    .bind(&token)
-    .bind(expires_at)
-    .bind(req.max_downloads)
-    .bind(&password_hash)
-    .bind(auth.user_id)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let row = client
+        .query_one(
+            "INSERT INTO share_links (file_id, folder_id, token, expires_at, max_downloads, password_hash, created_by) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *",
+            &[&req.file_id, &req.folder_id, &token, &expires_at, &req.max_downloads, &password_hash, &auth.user_id],
+        )
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let link = ShareLink::from(row);
 
     Ok((
         StatusCode::CREATED,
@@ -93,14 +91,15 @@ pub async fn get_share_info(
     State(state): State<AppState>,
     Path(token): Path<String>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let link = sqlx::query_as::<_, ShareLink>(
-        "SELECT * FROM share_links WHERE token = $1",
-    )
-    .bind(&token)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    .ok_or(StatusCode::NOT_FOUND)?;
+    let client = state.db.get().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let row = client
+        .query_opt("SELECT * FROM share_links WHERE token = $1", &[&token])
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let link = ShareLink::from(row);
 
     // Check expiration
     if let Some(expires_at) = link.expires_at {
@@ -118,16 +117,14 @@ pub async fn get_share_info(
 
     let needs_password = link.password_hash.is_some();
 
-    // Return file/folder info
     if let Some(file_id) = link.file_id {
-        let file = sqlx::query_as::<_, crate::models::FileRecord>(
-            "SELECT * FROM files WHERE id = $1",
-        )
-        .bind(file_id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::NOT_FOUND)?;
+        let file_row = client
+            .query_opt("SELECT * FROM files WHERE id = $1", &[&file_id])
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .ok_or(StatusCode::NOT_FOUND)?;
+
+        let file = FileRecord::from(file_row);
 
         return Ok(Json(serde_json::json!({
             "type": "file",
@@ -139,14 +136,13 @@ pub async fn get_share_info(
     }
 
     if let Some(folder_id) = link.folder_id {
-        let folder = sqlx::query_as::<_, crate::models::Folder>(
-            "SELECT * FROM folders WHERE id = $1",
-        )
-        .bind(folder_id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::NOT_FOUND)?;
+        let folder_row = client
+            .query_opt("SELECT * FROM folders WHERE id = $1", &[&folder_id])
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .ok_or(StatusCode::NOT_FOUND)?;
+
+        let folder = Folder::from(folder_row);
 
         return Ok(Json(serde_json::json!({
             "type": "folder",
@@ -162,23 +158,22 @@ pub async fn download_shared(
     State(state): State<AppState>,
     Path(token): Path<String>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let link = sqlx::query_as::<_, ShareLink>(
-        "SELECT * FROM share_links WHERE token = $1",
-    )
-    .bind(&token)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    .ok_or(StatusCode::NOT_FOUND)?;
+    let client = state.db.get().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    // Check expiration
+    let row = client
+        .query_opt("SELECT * FROM share_links WHERE token = $1", &[&token])
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let link = ShareLink::from(row);
+
     if let Some(expires_at) = link.expires_at {
         if expires_at < chrono::Utc::now() {
             return Err(StatusCode::GONE);
         }
     }
 
-    // Check download limit
     if let Some(max) = link.max_downloads {
         if link.download_count >= max {
             return Err(StatusCode::GONE);
@@ -187,19 +182,19 @@ pub async fn download_shared(
 
     let file_id = link.file_id.ok_or(StatusCode::BAD_REQUEST)?;
 
-    let file = sqlx::query_as::<_, crate::models::FileRecord>(
-        "SELECT * FROM files WHERE id = $1",
-    )
-    .bind(file_id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    .ok_or(StatusCode::NOT_FOUND)?;
+    let file_row = client
+        .query_opt("SELECT * FROM files WHERE id = $1", &[&file_id])
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
 
-    // Increment download count
-    sqlx::query("UPDATE share_links SET download_count = download_count + 1 WHERE id = $1")
-        .bind(link.id)
-        .execute(&state.db)
+    let file = FileRecord::from(file_row);
+
+    client
+        .execute(
+            "UPDATE share_links SET download_count = download_count + 1 WHERE id = $1",
+            &[&link.id],
+        )
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 

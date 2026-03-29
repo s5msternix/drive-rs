@@ -1,4 +1,4 @@
-<script lang="ts">
+<script>
 	import '../app.css';
 	import { onMount } from 'svelte';
 	import { auth } from '$lib/api/client';
