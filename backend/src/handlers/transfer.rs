@@ -21,24 +21,23 @@ fn generate_token() -> String {
     hex::encode(bytes)
 }
 
-/// Create a new P2P transfer session
 pub async fn create_session(
     State(state): State<AppState>,
     Json(req): Json<CreateTransferRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let token = generate_token();
 
-    let session = sqlx::query_as::<_, TransferSession>(
-        r#"INSERT INTO transfer_sessions (token, file_name, file_size)
-           VALUES ($1, $2, $3)
-           RETURNING *"#,
-    )
-    .bind(&token)
-    .bind(&req.file_name)
-    .bind(req.file_size)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let client = state.db.get().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let row = client
+        .query_one(
+            "INSERT INTO transfer_sessions (token, file_name, file_size) VALUES ($1, $2, $3) RETURNING *",
+            &[&token, &req.file_name, &req.file_size],
+        )
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let session = TransferSession::from(row);
 
     // Create broadcast channel for this session
     let (tx, _) = broadcast::channel(32);
@@ -56,19 +55,22 @@ pub async fn create_session(
     ))
 }
 
-/// Get transfer session info
 pub async fn get_session(
     State(state): State<AppState>,
     Path(token): Path<String>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let session = sqlx::query_as::<_, TransferSession>(
-        "SELECT * FROM transfer_sessions WHERE token = $1 AND is_active = true AND expires_at > NOW()",
-    )
-    .bind(&token)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    .ok_or(StatusCode::NOT_FOUND)?;
+    let client = state.db.get().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let row = client
+        .query_opt(
+            "SELECT * FROM transfer_sessions WHERE token = $1 AND is_active = true AND expires_at > NOW()",
+            &[&token],
+        )
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let session = TransferSession::from(row);
 
     Ok(Json(TransferSessionResponse {
         id: session.id,
@@ -79,7 +81,6 @@ pub async fn get_session(
     }))
 }
 
-/// WebSocket handler for P2P signaling
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
     Path(token): Path<String>,
@@ -91,7 +92,6 @@ pub async fn ws_handler(
 async fn handle_signaling(socket: WebSocket, token: String, state: AppState) {
     let (mut sender, mut receiver) = socket.split();
 
-    // Get or create broadcast channel
     let tx = {
         let channels = state.transfer_channels.read().await;
         match channels.get(&token) {
@@ -112,7 +112,6 @@ async fn handle_signaling(socket: WebSocket, token: String, state: AppState) {
 
     let mut rx = tx.subscribe();
 
-    // Notify peers that someone joined
     let _ = tx.send(
         serde_json::to_string(&SignalMessage::PeerJoined {
             role: "peer".to_string(),
@@ -120,7 +119,6 @@ async fn handle_signaling(socket: WebSocket, token: String, state: AppState) {
         .unwrap(),
     );
 
-    // Forward broadcast messages to this WebSocket
     let tx_clone = Arc::clone(&tx);
     let mut send_task = tokio::spawn(async move {
         while let Ok(msg) = rx.recv().await {
@@ -130,7 +128,6 @@ async fn handle_signaling(socket: WebSocket, token: String, state: AppState) {
         }
     });
 
-    // Forward WebSocket messages to broadcast channel
     let mut recv_task = tokio::spawn(async move {
         while let Some(Ok(msg)) = receiver.next().await {
             if let Message::Text(text) = msg {
@@ -139,13 +136,11 @@ async fn handle_signaling(socket: WebSocket, token: String, state: AppState) {
         }
     });
 
-    // Wait for either task to finish
     tokio::select! {
         _ = &mut send_task => recv_task.abort(),
         _ = &mut recv_task => send_task.abort(),
     }
 
-    // Notify peers that someone left
     let _ = tx.send(
         serde_json::to_string(&SignalMessage::PeerLeft).unwrap(),
     );

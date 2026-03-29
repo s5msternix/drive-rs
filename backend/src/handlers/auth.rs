@@ -4,18 +4,16 @@ use rand::rngs::OsRng;
 
 use crate::AppState;
 use crate::middleware::auth::create_token;
-use crate::models::{AuthResponse, LoginRequest, RegisterRequest, UserPublic};
+use crate::models::{AuthResponse, LoginRequest, RegisterRequest, User, UserPublic};
 
 pub async fn register(
     State(state): State<AppState>,
     Json(req): Json<RegisterRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    // Validate input
     if req.email.is_empty() || req.username.is_empty() || req.password.len() < 8 {
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    // Hash password
     let salt = SaltString::generate(&mut OsRng);
     let argon2 = Argon2::default();
     let password_hash = argon2
@@ -23,19 +21,17 @@ pub async fn register(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .to_string();
 
-    // Insert user
-    let user = sqlx::query_as::<_, crate::models::User>(
-        r#"INSERT INTO users (email, username, password_hash)
-           VALUES ($1, $2, $3)
-           RETURNING *"#,
-    )
-    .bind(&req.email)
-    .bind(&req.username)
-    .bind(&password_hash)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|_| StatusCode::CONFLICT)?;
+    let client = state.db.get().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
+    let row = client
+        .query_one(
+            "INSERT INTO users (email, username, password_hash) VALUES ($1, $2, $3) RETURNING *",
+            &[&req.email, &req.username, &password_hash],
+        )
+        .await
+        .map_err(|_| StatusCode::CONFLICT)?;
+
+    let user = User::from(row);
     let token = create_token(user.id, &user.email, &state.config.jwt_secret)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -52,16 +48,16 @@ pub async fn login(
     State(state): State<AppState>,
     Json(req): Json<LoginRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let user = sqlx::query_as::<_, crate::models::User>(
-        "SELECT * FROM users WHERE email = $1",
-    )
-    .bind(&req.email)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    .ok_or(StatusCode::UNAUTHORIZED)?;
+    let client = state.db.get().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    // Verify password
+    let row = client
+        .query_opt("SELECT * FROM users WHERE email = $1", &[&req.email])
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let user = User::from(row);
+
     let parsed_hash = PasswordHash::new(&user.password_hash)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Argon2::default()
@@ -81,14 +77,14 @@ pub async fn me(
     State(state): State<AppState>,
     auth: crate::middleware::AuthUser,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let user = sqlx::query_as::<_, crate::models::User>(
-        "SELECT * FROM users WHERE id = $1",
-    )
-    .bind(auth.user_id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    .ok_or(StatusCode::NOT_FOUND)?;
+    let client = state.db.get().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
+    let row = client
+        .query_opt("SELECT * FROM users WHERE id = $1", &[&auth.user_id])
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let user = User::from(row);
     Ok(Json(UserPublic::from(user)))
 }

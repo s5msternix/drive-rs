@@ -1,19 +1,19 @@
-<script lang="ts">
+<script>
 	import { onMount } from 'svelte';
 	import { files as filesApi, folders as foldersApi, share as shareApi } from '$lib/api/client';
 	import { user } from '$lib/stores/auth';
 	import { formatBytes } from '$lib/stores/auth';
 
-	let currentFolderId: string | undefined = $state(undefined);
-	let breadcrumbs: { id?: string; name: string }[] = $state([{ name: 'Ana Dizin' }]);
-	let folderList: any[] = $state([]);
-	let fileList: any[] = $state([]);
+	let currentFolderId = $state(undefined);
+	let breadcrumbs = $state([{ name: 'Ana Dizin' }]);
+	let folderList = $state([]);
+	let fileList = $state([]);
 	let loading = $state(true);
 	let showNewFolder = $state(false);
 	let newFolderName = $state('');
 	let dragOver = $state(false);
 	let uploading = $state(false);
-	let shareModal: { show: boolean; url: string } = $state({ show: false, url: '' });
+	let shareModal = $state({ show: false, url: '' });
 
 	onMount(() => loadContents());
 
@@ -33,7 +33,7 @@
 		}
 	}
 
-	async function navigateToFolder(folderId: string | undefined, folderName?: string) {
+	async function navigateToFolder(folderId, folderName) {
 		if (folderId === currentFolderId) return;
 
 		if (!folderId) {
@@ -63,7 +63,7 @@
 		}
 	}
 
-	async function deleteFolder(id: string) {
+	async function deleteFolder(id) {
 		if (!confirm('Bu klasörü silmek istediğinize emin misiniz?')) return;
 		try {
 			await foldersApi.delete(id);
@@ -73,7 +73,7 @@
 		}
 	}
 
-	async function deleteFile(id: string) {
+	async function deleteFile(id) {
 		if (!confirm('Bu dosyayı silmek istediğinize emin misiniz?')) return;
 		try {
 			await filesApi.delete(id);
@@ -83,7 +83,7 @@
 		}
 	}
 
-	async function downloadFile(id: string, name: string) {
+	async function downloadFile(id, name) {
 		try {
 			const blob = await filesApi.download(id);
 			const url = URL.createObjectURL(blob);
@@ -97,7 +97,7 @@
 		}
 	}
 
-	async function handleUpload(filesList: FileList | null) {
+	async function handleUpload(filesList) {
 		if (!filesList || filesList.length === 0) return;
 		uploading = true;
 		try {
@@ -112,18 +112,18 @@
 		}
 	}
 
-	function handleDrop(e: DragEvent) {
+	function handleDrop(e) {
 		e.preventDefault();
 		dragOver = false;
 		handleUpload(e.dataTransfer?.files ?? null);
 	}
 
-	function handleDragOver(e: DragEvent) {
+	function handleDragOver(e) {
 		e.preventDefault();
 		dragOver = true;
 	}
 
-	async function shareFile(fileId: string) {
+	async function shareFile(fileId) {
 		try {
 			const res = await shareApi.createLink({ file_id: fileId, expires_in_hours: 72 });
 			shareModal = { show: true, url: `${window.location.origin}/share/${res.token}` };
@@ -132,7 +132,7 @@
 		}
 	}
 
-	function getFileIcon(mime: string): string {
+	function getFileIcon(mime) {
 		if (mime.startsWith('image/')) return '🖼';
 		if (mime.startsWith('video/')) return '🎬';
 		if (mime.startsWith('audio/')) return '🎵';
@@ -142,7 +142,7 @@
 		return '📎';
 	}
 
-	let fileInput: HTMLInputElement;
+	let fileInput;
 </script>
 
 <div
@@ -175,7 +175,7 @@
 				type="file"
 				multiple
 				bind:this={fileInput}
-				onchange={(e) => handleUpload((e.target as HTMLInputElement).files)}
+				onchange={(e) => handleUpload(e.target.files)}
 				hidden
 			/>
 		</div>

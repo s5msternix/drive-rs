@@ -1,9 +1,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct User {
     pub id: Uuid,
     pub email: String,
@@ -14,6 +13,21 @@ pub struct User {
     pub storage_limit: i64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+impl From<tokio_postgres::Row> for User {
+    fn from(row: tokio_postgres::Row) -> Self {
+        Self {
+            id: row.get("id"),
+            email: row.get("email"),
+            username: row.get("username"),
+            password_hash: row.get("password_hash"),
+            storage_used: row.get("storage_used"),
+            storage_limit: row.get("storage_limit"),
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]

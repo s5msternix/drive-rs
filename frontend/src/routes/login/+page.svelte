@@ -1,4 +1,4 @@
-<script lang="ts">
+<script>
 	import { auth as authApi } from '$lib/api/client';
 	import { setAuth } from '$lib/stores/auth';
 	import { goto } from '$app/navigation';
@@ -15,7 +15,7 @@
 			const res = await authApi.login({ email, password });
 			setAuth(res.token, res.user);
 			goto('/drive');
-		} catch (e: any) {
+		} catch (e) {
 			error = 'Geçersiz e-posta veya şifre';
 		} finally {
 			loading = false;

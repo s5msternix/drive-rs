@@ -1,21 +1,21 @@
-<script lang="ts">
+<script>
+	import { onMount } from 'svelte';
+	import { page } from '$app/stores';
 	import { transfer as transferApi } from '$lib/api/client';
 	import { formatBytes } from '$lib/stores/auth';
 
-	type Mode = 'idle' | 'sending' | 'receiving';
-
-	let mode: Mode = $state('idle');
-	let selectedFile: File | null = $state(null);
+	let mode = $state('idle');
+	let selectedFile = $state(null);
 	let sessionToken = $state('');
 	let receiveToken = $state('');
 	let transferUrl = $state('');
 	let status = $state('');
 	let progress = $state(0);
 	let error = $state('');
-	let ws: WebSocket | null = $state(null);
-	let pc: RTCPeerConnection | null = $state(null);
+	let ws = $state(null);
+	let pc = $state(null);
 
-	const rtcConfig: RTCConfiguration = {
+	const rtcConfig = {
 		iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
 	};
 
@@ -35,7 +35,6 @@
 			transferUrl = `${window.location.origin}/transfer?receive=${session.token}`;
 			status = 'Alıcı bekleniyor... Linki paylaşın.';
 
-			// Connect signaling
 			ws = transferApi.connectSignaling(session.token);
 			ws.onmessage = async (e) => {
 				const msg = JSON.parse(e.data);
@@ -49,7 +48,7 @@
 					} catch {}
 				}
 			};
-		} catch (e: any) {
+		} catch (e) {
 			error = 'Oturum oluşturulamadı';
 			mode = 'idle';
 		}
@@ -78,13 +77,12 @@
 		ws.send(JSON.stringify({ type: 'offer', sdp: offer.sdp }));
 	}
 
-	async function sendFileOverChannel(channel: RTCDataChannel) {
+	async function sendFileOverChannel(channel) {
 		if (!selectedFile) return;
-		const CHUNK_SIZE = 64 * 1024; // 64KB
+		const CHUNK_SIZE = 64 * 1024;
 		const file = selectedFile;
 		let offset = 0;
 
-		// Send metadata first
 		channel.send(JSON.stringify({ name: file.name, size: file.size, type: file.type }));
 
 		const reader = new FileReader();
@@ -96,12 +94,11 @@
 
 		reader.onload = () => {
 			if (!reader.result) return;
-			channel.send(reader.result as ArrayBuffer);
-			offset += (reader.result as ArrayBuffer).byteLength;
+			channel.send(reader.result);
+			offset += reader.result.byteLength;
 			progress = Math.min(100, (offset / file.size) * 100);
 
 			if (offset < file.size) {
-				// Back-pressure: wait if buffered amount is too high
 				if (channel.bufferedAmount > CHUNK_SIZE * 8) {
 					setTimeout(readSlice, 50);
 				} else {
@@ -138,13 +135,13 @@
 					} catch {}
 				}
 			};
-		} catch (e: any) {
+		} catch (e) {
 			error = 'Oturum bulunamadı veya süresi dolmuş';
 			mode = 'idle';
 		}
 	}
 
-	async function handleOffer(sdp: string) {
+	async function handleOffer(sdp) {
 		if (!ws) return;
 		status = 'Bağlantı kuruluyor...';
 
@@ -156,8 +153,8 @@
 			}
 		};
 
-		let receivedChunks: ArrayBuffer[] = [];
-		let fileInfo: { name: string; size: number; type: string } | null = null;
+		let receivedChunks = [];
+		let fileInfo = null;
 
 		pc.ondatachannel = (e) => {
 			const channel = e.channel;
@@ -166,7 +163,6 @@
 			channel.onmessage = (ev) => {
 				if (typeof ev.data === 'string') {
 					if (ev.data === '__DONE__') {
-						// Assemble and download
 						const blob = new Blob(receivedChunks, { type: fileInfo?.type || 'application/octet-stream' });
 						const url = URL.createObjectURL(blob);
 						const a = document.createElement('a');
@@ -177,10 +173,9 @@
 						status = 'Transfer tamamlandı! Dosya indirildi.';
 						return;
 					}
-					// File metadata
 					try {
 						fileInfo = JSON.parse(ev.data);
-						status = `"${fileInfo!.name}" alınıyor...`;
+						status = `"${fileInfo.name}" alınıyor...`;
 					} catch {}
 					return;
 				}
@@ -214,10 +209,6 @@
 		error = '';
 	}
 
-	// Auto-fill receive token from URL params
-	import { onMount } from 'svelte';
-	import { page } from '$app/stores';
-
 	onMount(() => {
 		const receive = $page.url.searchParams.get('receive');
 		if (receive) {
@@ -226,7 +217,7 @@
 		}
 	});
 
-	let fileInput: HTMLInputElement;
+	let fileInput;
 </script>
 
 <div class="transfer-page">
@@ -260,7 +251,7 @@
 							type="file"
 							bind:this={fileInput}
 							onchange={(e) => {
-								const f = (e.target as HTMLInputElement).files;
+								const f = e.target.files;
 								if (f && f.length > 0) selectedFile = f[0];
 							}}
 							hidden
