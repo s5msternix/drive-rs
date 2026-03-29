@@ -1,0 +1,101 @@
+:root {
+	--bg: #0f1117;
+	--bg-secondary: #1a1d27;
+	--bg-tertiary: #242836;
+	--border: #2e3347;
+	--text: #e4e6f0;
+	--text-muted: #8b8fa3;
+	--primary: #6366f1;
+	--primary-hover: #818cf8;
+	--danger: #ef4444;
+	--danger-hover: #f87171;
+	--success: #22c55e;
+	--warning: #f59e0b;
+	--radius: 8px;
+	--radius-lg: 12px;
+}
+
+* {
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
+}
+
+body {
+	font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+	background: var(--bg);
+	color: var(--text);
+	line-height: 1.6;
+}
+
+a {
+	color: var(--primary);
+	text-decoration: none;
+}
+
+a:hover {
+	color: var(--primary-hover);
+}
+
+button {
+	cursor: pointer;
+	border: none;
+	font-family: inherit;
+	font-size: 0.875rem;
+	padding: 0.5rem 1rem;
+	border-radius: var(--radius);
+	transition: all 0.15s ease;
+}
+
+.btn-primary {
+	background: var(--primary);
+	color: white;
+}
+
+.btn-primary:hover {
+	background: var(--primary-hover);
+}
+
+.btn-danger {
+	background: var(--danger);
+	color: white;
+}
+
+.btn-danger:hover {
+	background: var(--danger-hover);
+}
+
+.btn-ghost {
+	background: transparent;
+	color: var(--text-muted);
+	border: 1px solid var(--border);
+}
+
+.btn-ghost:hover {
+	background: var(--bg-tertiary);
+	color: var(--text);
+}
+
+input, select {
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border);
+	color: var(--text);
+	padding: 0.625rem 0.875rem;
+	border-radius: var(--radius);
+	font-family: inherit;
+	font-size: 0.875rem;
+	width: 100%;
+	outline: none;
+	transition: border-color 0.15s ease;
+}
+
+input:focus {
+	border-color: var(--primary);
+}
+
+.card {
+	background: var(--bg-secondary);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-lg);
+	padding: 1.5rem;
+}
